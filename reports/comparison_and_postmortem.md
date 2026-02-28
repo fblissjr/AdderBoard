@@ -31,18 +31,26 @@ Current leaders: 36 params hand-coded (alexlitz), 311 params trained (rezabyt).
 - **Approach**: Curriculum learning (3 phases) + extended grokking
 - **Time**: ~45 min training on CPU
 
-### Gemini: 0-Parameter Analytical Adder (FAILED)
+### Gemini v1: 0-Parameter Analytical Adder (FAILED)
 
 - **Result**: 0% accuracy (shape crash, then wrong answers)
 - **Architecture**: 1L, d=1, 2h with ALiBi + cosine decode
 - **Approach**: Base-10 prefix sum via ALiBi, softmax anchoring
-- **Time**: ~1 hour reasoning
+- **Time**: ~1 hour reasoning, no testing
+
+### Gemini v2: 33-Parameter Standard Transformer (SUCCESS)
+
+- **Result**: 100% accuracy, 33 params, QUALIFIED
+- **Architecture**: 1L decoder, d=3, 3h (d_head=1), ff=4
+- **Approach**: Fixed 3 bugs from v1, added residual cancellation head,
+  switched to parabolic decode, tested locally before submitting
+- **Time**: Second iteration after failure analysis
 
 ---
 
 ## Postmortem: Why Things Succeeded or Failed
 
-### Why the hand-coded model worked
+### Why Claude's hand-coded model worked (but is too large)
 
 1. **Incremental verification**: Tested on 5 concrete examples (including edge
    cases like 999999999+1 and 9999999999+9999999999) before running the full
@@ -53,65 +61,100 @@ Current leaders: 36 params hand-coded (alexlitz), 311 params trained (rezabyt).
 
 3. **Exact arithmetic**: Every operation (ReLU thresholding, softmax averaging,
    parabolic decode) produces exact results for integer inputs in float64.
-   No accumulated error.
 
 4. **Mathematical proof before code**: The carry detection theorem (diff in
    {-1,0,9,10}) and the impossibility of linear mod-10 decode were proven
    before writing a single line, preventing architectural dead ends.
 
-### Why training failed
+5. **But: wrong architectural choice**: Using 2 layers and d_model=5 was
+   correct but far from minimal. The carry-in-MLP approach requires 2 layers;
+   the carry-in-attention approach (ALiBi prefix sum) needs only 1. This
+   architectural decision is the root cause of the 7.5x parameter gap vs
+   Gemini v2.
+
+### Why Claude's training failed
 
 1. **Missing rank-3 factorization**: Every successful trained model on the
-   leaderboard (311-777 params) uses rank-3 factorized projections. This
-   constrains the weight space to force the model toward the addition algorithm.
-   Without it, the model has too many degrees of freedom and gets stuck in
-   local minima that look like addition but aren't.
+   leaderboard uses rank-3 factorized projections. This constrains the weight
+   space to force the model toward the addition algorithm.
 
-2. **No weight tying**: Tying the embedding and LM head (as all successful
-   models do) halves the search space for the output mapping.
+2. **No weight tying**: Tying the embedding and LM head halves the search space
+   for the output mapping.
 
 3. **Insufficient training duration**: The grokking phenomenon requires training
    well past memorization. Our 107K steps may not have been enough -- some
    successful models train for 500K+ steps.
 
 4. **Wrong evaluation frequency**: Checking accuracy every 1000 steps with
-   only 200 samples gives noisy estimates. Grokking can be sudden -- the model
-   might jump from 5% to 95% between two checkpoints.
+   only 200 samples gives noisy estimates. Grokking can be sudden.
 
-### Why Gemini's approach failed
+### Why Gemini v1 failed (0%)
 
-1. **No testing loop**: Gemini proved correctness symbolically but never
-   executed the code. The first bug (tensor shape) would have been caught by
-   any single test case.
+1. **No testing**: Proved correctness symbolically but never ran the code.
+2. **Three trivial execution bugs**: 2x multiplier in O_proj, missing LM head
+   term, unmasked attention during generation. Any single test case would have
+   caught all three.
+3. **Overfit to elegance**: The 0-parameter claim and cosine decode were
+   mathematically interesting but added fragility.
 
-2. **Indexing inconsistency**: The attention bias matrix M was built for one
-   input format, but the add() function used a different one. Positions didn't
-   match.
+### Why Gemini v2 succeeded (100%, 33 params)
 
-3. **Fragile numerical chain**: Softmax anchoring (multiply by e^80) followed
-   by carry detection (threshold at 1.0 with epsilon 1e-11) creates a long
-   chain of floating-point operations where errors accumulate.
+1. **Identified exact bugs**: Didn't redesign the math -- fixed three specific
+   implementation errors.
+2. **Added residual cancellation**: Head 2 with V=[-1,0,0] cancels the residual
+   connection, giving clean A+B to the MLP regardless of previous output.
+3. **Carried in attention**: ALiBi prefix sum computes carries in one attention
+   pass, enabling single-layer architecture.
+4. **d_model=3 with d_head=1**: Maximum information density per parameter.
+5. **Actually tested locally**: The testing that should have happened in v1.
 
-4. **Optimized for elegance, not correctness**: The 0-parameter claim is
-   technically interesting but practically useless if the model doesn't work.
+---
+
+## The Critical Architectural Decision
+
+The central lesson is about WHERE carry detection happens:
+
+| Approach | Carry location | Layers needed | Params |
+|----------|---------------|---------------|--------|
+| Claude | MLP (compare prev output to prev digit sum) | 2 | 249 |
+| Gemini v2 | Attention (ALiBi prefix sum) | 1 | 33 |
+| alexlitz (leader) | Attention (ALiBi slope=log10) | 2 (but minimal) | 36 |
+
+**Carry-in-attention** is the key insight. The ALiBi prefix sum
+S_k = sum_{j<k} (A_j + B_j) * 10^(j-k) naturally encodes the carry as
+floor(S_k) in {0, 1}. This is computed entirely within the attention mechanism
+using fixed attention biases (0-param buffers), meaning the MLP only needs to:
+1. Extract the integer carry (+1 if carry)
+2. Subtract 10 if total >= 10
+
+**Carry-in-MLP** (our approach) requires the MLP to first detect whether a carry
+occurred by comparing the previous output digit to the previous digit pair sum.
+This comparison requires reading the previous output, which means:
+1. Layer 1 attention gathers the previous digit pair AND previous output
+2. Layer 1 MLP detects the carry
+3. Layer 2 MLP computes mod-10
+
+Two operations chained through the MLP require two layers. The linear mod-10
+impossibility proof is correct (a linear LM head can't do mod-10 for [0,19]),
+but it's irrelevant to Gemini's approach because the MLP computes mod-10 before
+the LM head sees it.
 
 ---
 
 ## Approaches We Didn't Try (and Why)
 
-### 1. Single-Layer with ALiBi (would likely work, fewer params)
+### 1. Single-Layer with ALiBi + Residual Cancellation (Gemini v2's approach)
 
-The 36-param leader uses ALiBi with slope=log(10) to implement base-10 prefix
-summation in a single attention head. This computes the carry for position i
-by attending to all preceding digits with exponentially decaying weights that
-match powers of 10.
+This is exactly what Gemini v2 built: d_model=3, 3 heads, ALiBi prefix sum
+for carry, head 2 for residual cancellation, 2-hinge MLP, parabolic decode.
 
-**Why we didn't**: The ALiBi approach requires understanding a subtler
-mathematical construction (the fractional carry emerges from the decimal
-expansion of the prefix sum, not from explicit carry detection). We chose the
-more straightforward 2-layer approach to maximize chance of success.
+**Why we didn't**: We chose the more straightforward 2-layer approach to
+maximize chance of first-attempt success. The ALiBi prefix sum requires
+understanding the fractional carry representation, which is subtler than
+explicit carry detection. In hindsight, we should have spent more time studying
+the 36-param leader's architecture before committing to 2 layers.
 
-**Estimated params**: 40-80 range if implemented correctly.
+**Result**: 33 params, 100% accuracy. Gemini proved it works.
 
 ### 2. RoPE with Period Matching (Wonderfall's approach, 40 params)
 
@@ -119,111 +162,137 @@ RoPE with period 19 creates identical rotary embeddings for positions that
 differ by 19. With the right input format, this makes A_i and B_i
 "look identical" to the attention mechanism, enabling natural digit pairing.
 
-**Why we didn't**: Requires MLX (Wonderfall's implementation) or careful
-PyTorch RoPE construction. The period-19 trick is specific to a particular
-input format (padded to make offsets align), adding complexity.
+**Why we didn't**: Requires MLX or careful PyTorch RoPE construction. The
+period-19 trick is specific to a particular input format.
 
-**Estimated params**: 40-60.
+### 3. Rank-1 Factorized Projections (compression of our model)
 
-### 3. Rank-1 Factorized Projections (would reduce our param count)
+Express each weight matrix as an outer product W = u * v^T. Gives 2*d instead
+of d^2 params per matrix.
 
-Instead of full d_model x d_model weight matrices, express each as an outer
-product of two vectors: W = u * v^T. This gives 2*d instead of d^2 params.
+**Why we didn't**: Optimization step, not architecture change. Would reduce
+our 249 to ~80-100 but still wouldn't match the 33-param single-layer approach.
 
-**Why we didn't**: Our priority was correctness, not compression. This is a
-pure optimization step that doesn't change the mathematical approach.
+### 4. Evolutionary/Search-Based Weight Finding
 
-**Estimated savings**: Could reduce our 249 to ~80-100.
+Use CMA-ES or random search to find weights for a small architecture. Bridges
+the gap between "hand-coded" and "trained."
 
-### 4. Sparse Embedding with Weight Sharing
+**Why we didn't**: Time constraint. Requires implementing a search loop.
 
-Our embedding uses 10 non-zero values in a 11x5 matrix. Could share the
-embedding with the LM head (parabolic decode already uses structured weights).
+### 5. Knowledge Distillation
 
-**Why we didn't**: Same as above -- optimization, not architecture change.
+Use our 249-param model as teacher for a smaller student.
 
-**Estimated savings**: ~30-40 params.
-
-### 5. Evolutionary/Search-Based Weight Finding
-
-Use an optimization algorithm (CMA-ES, random search) to find weights for a
-small hand-coded architecture, bridging the gap between "hand-coded" and
-"trained."
-
-**Why we didn't**: Time constraint. This requires implementing a search loop
-and running many verification iterations.
-
-### 6. Knowledge Distillation from Our Working Model
-
-Use our 249-param working model as a teacher to train a smaller student model.
-The teacher provides soft targets that are much easier to learn from than raw
-addition data.
-
-**Why we didn't**: Requires training infrastructure that we'd need to debug.
-The hand-coded approach was already working.
+**Why we didn't**: Requires training infrastructure. The hand-coded approach
+was already working.
 
 ---
 
-## Hybrid Approach: Architecture + Data-Driven Strategy
+## What We'd Do Differently
 
-The most promising path forward combines both approaches:
+### 1. Study the leader before building
 
-### Phase 1: Architecture-Guided Initialization
+We studied the leaderboard entries (alexlitz 36p, Wonderfall 40p) but didn't
+fully internalize the ALiBi prefix sum technique. We understood the math but
+chose the "safer" 2-layer approach. In hindsight, the 1-layer ALiBi approach is
+not harder to implement -- it's just harder to derive from scratch. We should
+have spent 30 more minutes understanding the carry-in-attention trick before
+committing to an architecture.
 
-Start with our hand-coded 249-param model and identify which weight values are
-"structural" (routing, thresholding) vs "computational" (digit values, scales).
-Use the structural weights as initialization for a smaller model.
+### 2. Start at d_model=3, not d_model=5
 
-### Phase 2: Rank-3 Factorized Training
+Our d_model=5 wastes 2 dimensions on scratch space. The key data to route is:
+digit value (1 dim), digit pair sum (1 dim), carry indicator (1 dim). That's 3.
+Gemini's d_head=1 per head is the natural minimum. We should have asked "what's
+the minimum d_model?" before "how many layers?"
 
-Replace full weight matrices with rank-3 factorizations (the key trick from
-all successful trained models). Initialize the factorized weights to approximate
-our hand-coded solution. This constrains the search space while allowing the
-optimizer to find a more compact representation.
+### 3. Address the residual problem directly
 
-### Phase 3: Curriculum with Warm Start
+We handled the residual connection by keeping token identity in a separate
+dimension and routing around it. Gemini's Head 2 cancellation is cleaner: it
+actively removes the residual contribution rather than working around it. This
+is a design pattern worth remembering: if the residual is in your way, cancel
+it with a dedicated attention head.
 
-Train with curriculum learning, but starting from a model that already works
-for simple cases (since it was initialized from the hand-coded solution).
-This should dramatically accelerate convergence compared to random init.
+### 4. The trained track needed domain-specific tricks
 
-### Phase 4: Grokking Phase with Careful Monitoring
+Vanilla transformer + curriculum learning was never going to work for this
+problem at 777 params. Every successful trained model uses:
+- Rank-3 factorized projections
+- Weight-tied embedding/LM head
+- Very long training (500K+ steps)
+- Specific optimizer settings for grokking
 
-After the curriculum, run extended training at low LR with frequent evaluation.
-Watch for the grokking transition -- the moment where the model generalizes
-from memorization to algorithm.
+We should have either implemented these tricks or skipped the trained track
+entirely in favor of optimizing the hand-coded model.
 
-### Expected Outcome
+---
 
-This hybrid approach should:
-- Achieve 99%+ accuracy (since we start from a working solution)
-- Reduce param count to 100-200 range via factorization
-- Potentially reach the 300-500 range for the trained category
-- Avoid the training pitfalls we hit (stuck at 2.5%) because the model
-  starts in a good region of weight space
+## Revised Path Forward
+
+### For hand-coded category: Adopt Gemini v2's architecture
+
+The 33-param model is the clear template. To beat the 36-param leader:
+
+1. The 33-param model already beats alexlitz (36p) on unique param count.
+   The question is whether the leaderboard counts unique values or tensor
+   elements -- this determines whether Gemini's submission is competitive.
+
+2. Potential optimizations: weight tying between embed and LM head could
+   reduce unique values further. The parabolic decode W[c,0] = 2c and embed
+   values 0-9 are related (W[c,0] = 2*embed[c,0]).
+
+### For trained category: Architecture-guided training
+
+1. Start with Gemini v2's 33-param architecture as initialization
+2. Add rank-3 factorization to weight matrices
+3. Train with curriculum + extended grokking (500K+ steps)
+4. Use weight tying between embed and LM head
+5. Monitor for sudden grokking transition with frequent evaluation
+
+### For understanding: Trace every intermediate value
+
+Both working models (Claude 249p, Gemini 33p) should be instrumented to dump
+intermediate tensor values for specific test cases. This would:
+- Confirm the mathematical analysis
+- Identify any numerical edge cases
+- Provide debugging traces for future optimization attempts
 
 ---
 
 ## Lessons Learned
 
-1. **Test early, test often**: Claude tested after 30 minutes of work. Gemini
-   tested after 1 hour. The model that tested first was the one that worked.
+1. **Test early, test often**: Claude tested after 30 minutes. Gemini v1 never
+   tested and scored 0%. Gemini v2 tested locally and scored 100%. Testing is
+   the single strongest predictor of success.
 
-2. **Prove impossibility before building**: The linear-mod-10 impossibility
-   proof saved an entire architecture iteration. Know what CAN'T work before
-   investing time in what might.
+2. **Architecture > optimization**: The choice of carry-in-attention (1 layer)
+   vs carry-in-MLP (2 layers) matters more than any parameter compression trick.
+   Gemini v2's 33 params vs our 249 is an architectural difference, not an
+   optimization difference.
 
-3. **Separate concerns**: The 2-layer approach works because each layer has
-   one job. Trying to combine carry detection and mod-10 in a single layer
-   leads to mathematical dead ends.
+3. **Prove impossibility, but know its scope**: The linear-mod-10 impossibility
+   proof is correct and useful -- it rules out certain architectures. But it
+   doesn't rule out ALL 1-layer approaches, only those that defer mod-10 to the
+   LM head. Computing mod-10 in the MLP (as both models do) sidesteps the proof.
 
-4. **Float64 is not magic**: Even with float64, softmax introduces normalization
-   errors. Exact arithmetic requires careful construction (integer inputs,
-   no accumulated error chains).
+4. **Float64 anchoring works if margins are sufficient**: Our earlier skepticism
+   about e^80 softmax anchoring was wrong. The error is ~3.6e-35, and the
+   thresholds use 1e-11 epsilon. That's 24 orders of magnitude of margin. The
+   technique is robust.
 
-5. **The leaderboard is a goldmine**: The successful models share common
-   techniques (rank-3 factorization, ALiBi, parabolic decode, RoPE digit
-   routing). Understanding these techniques before building saves enormous time.
+5. **Residual cancellation is a reusable pattern**: Dedicating an attention head
+   to cancel the residual connection's contribution is a powerful trick for
+   hand-coded transformers. It gives the MLP clean input without needing extra
+   dimensions or layers.
 
-6. **Working beats minimal**: A 249-param model that scores 100% is infinitely
-   more valuable than a 0-param model that scores 0%.
+6. **Failure is data**: Gemini's 0% first attempt directly produced the bug
+   analysis that led to the 100% second attempt. Without the failure, the
+   three specific bugs might never have been identified. Our postmortem
+   predicted this: "The mathematical framework is largely sound... the failure
+   was in execution."
+
+7. **Working beats minimal, but minimal+working beats both**: A 249-param model
+   that scores 100% is better than a 0-param model that scores 0%. But a
+   33-param model that scores 100% is better than both.
