@@ -10,7 +10,7 @@ Build the smallest transformer that adds two 10-digit numbers with >= 99%
 accuracy on 10,000 held-out random pairs. Two categories: hand-coded weights
 (constructive proof) and trained weights (learned from data).
 
-Current leaders: 36 params hand-coded (alexlitz), 311 params trained (rezabyt).
+Current leaders as of 2/28/26: 36 params hand-coded (alexlitz), 311 params trained (rezabyt).
 
 ---
 

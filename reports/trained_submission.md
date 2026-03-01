@@ -8,8 +8,6 @@ Last updated: 2026-02-28
 
 A 1-layer transformer that adds two 10-digit numbers, trained via AdamW with a novel hybrid approach: the attention routing mask is fixed (hand-coded, 0 learnable parameters) while the value/output projections, MLP, and LM head are learned from data.
 
-This beats the trained leaderboard leader (311 params, rezabyt) by 149 parameters.
-
 ## Architecture
 
 ```
@@ -183,7 +181,7 @@ Note: Due to random initialization, exact reproduction requires the same random 
 | Submission | Params | Accuracy | Method |
 |---|---|---|---|
 | **This (mask-w6)** | **162** | **100%** | **Fixed mask + AdamW** |
-| Trained leader (rezabyt) | 311 | 99%+ | SGD/Adam grokking |
-| Hand-coded leader (alexlitz) | 36 | 100% | Analytical |
+| Trained leader as of 2/28/26 | 311 | 99%+ | SGD/Adam grokking |
+| Hand-coded leader as of 2/28/26 | 36 | 100% | Analytical |
 | Our hand-coded 1L | 33 unique | 100% | Analytical (ALiBi prefix sum) |
 | Our hand-coded 2L | 249 | 100% | Analytical (carry in MLP) |
