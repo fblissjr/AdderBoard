@@ -1,0 +1,175 @@
+# AdderBoard - fblissjr, claude, gemini experiments
+
+<p align="center">
+  <img src="adderboard.png" width="500" alt="AdderBoard">
+</p>
+
+## Our Work So Far
+
+Co-authored by Claude (Opus), Gemini, and [fblissjr](https://github.com/fblissjr). See [AGENTS.md](AGENTS.md) for full methodology, training details, and experiment logs.
+
+These results are from our local `verify.py` runs. We haven't submitted to the official leaderboard yet and haven't independently verified all parameter counting claims.
+
+### Trained: 162 parameters (seeing 100% on local verify.py)
+
+1-layer transformer (d=3, 3 heads, ff=6) trained with AdamW. Uses a fixed attention mask derived from our hand-coded solution -- the mask encodes which positions attend to which (0 learnable params), and gradient descent learns what to compute (162 learnable params). Two-phase training: LR 0.01 for 50K steps, then LR 0.001 for 5K steps from best checkpoint. All training data randomly generated on the fly.
+
+```
+$ python verify.py submission_trained.py
+Model: 162-Parameter Trained Adder
+Results: 10010/10010 correct (100.00%)
+Status: QUALIFIED
+```
+
+Files: [`submission_trained.py`](submission_trained.py) | [`train_adder.py`](train_adder.py) | [`train_continue.py`](train_continue.py)
+
+### Hand-coded: 33 unique parameters (seeing 100% on local verify.py)
+
+1-layer transformer (d=3, 3 heads, ff=4) with analytically set weights. Uses ALiBi prefix sum with slope log(10) for carry computation in attention, residual cancellation head, e^80 softmax anchoring, 2-hinge ReLU step functions, and parabolic LM head.
+
+```
+$ python verify.py submission_1l.py
+Model: 1-Layer Adder (33 unique params)
+Results: 10010/10010 correct (100.00%)
+Status: QUALIFIED
+```
+
+Files: [`submission_1l.py`](submission_1l.py) | [`submission.py`](submission.py) (249-param 2L variant)
+
+---
+
+**Challenge:** Build the smallest transformer that can add two 10-digit numbers with >= 99% accuracy on a held-out 10K test set.
+
+This started with [Addition Under Pressure](https://dimitrisp.substack.com/p/addition-under-pressure), where I gave Claude Code and Codex the same prompt: train the smallest possible transformer that can do 10-digit addition with at least 99% accuracy. [Claude Code](https://github.com/anadim/smallest-addition-transformer-claude-code) came back with 6,080 parameters and [Codex](https://github.com/anadim/smallest-addition-transformer-codex) came back with 1,644. The community has since pushed this dramatically lower.
+
+Maintained by [Dimitris Papailiopoulos](https://github.com/anadim) ([@dimitrispapail](https://x.com/dimitrispapail)).
+
+We track two categories:
+
+- **Trained** — weights learned from data by any training algorithm (SGD, Adam, evolutionary search, etc.). The algorithm must be generic — it should work with any model and dataset, not just this specific problem. This encourages creative ideas around data format, tokenization, curriculum learning, and architecture search.
+- **Hand-coded** — weights set analytically. This is a constructive proof that the architecture *can* represent addition, regardless of whether SGD would find it.
+
+Both are valid. Both are interesting.
+
+## Leaderboard
+
+### Hand-Coded Weights (Constructive Proofs)
+
+| Rank | Params | Accuracy | Author | Built with | Architecture | Key Tricks | Link |
+|------|--------|----------|--------|------------|-------------|------------|------|
+| **1** | **33** | **100%** | **[fblissjr](https://github.com/fblissjr)** | **Claude Code + Gemini** | **1L decoder, d=3, 3h (d_head=1), ff=4** | **ALiBi prefix sum for carry-in-attention, e^80 softmax anchoring, residual cancellation head, 2-hinge ReLU step, parabolic LM head, float64** | **[repo](https://github.com/fblissjr/AdderBoard/blob/main/submission_1l.py)** |
+| 2 | 36 | 100% | [alexlitz](https://github.com/alexlitz) | | 2L decoder, d=5, 5h+1h | ALiBi slope=log(10) for base-10 weighting, sparse embed, gated ReLU FFN, float64 | [gist](https://gist.github.com/alexlitz/0d5efbccf443fb0e8136b8f5bd85140a) |
+| 3 | 40 | 100% | [Wonderfall](https://github.com/Wonderfall) ([@w0nderfall](https://x.com/w0nderfall)) | | 1L decoder, d=2, 1h, hd=2 | Tied Q/K + V/O projections, RoPE period-19, parabolic tied-embed decode, two-hinge ReLU MLP | [gist](https://gist.github.com/Wonderfall/373460ba8cec6cd143c8b0e9ebcd1294) |
+| 4 | 50 | 100% | [lichengliu03](https://github.com/lichengliu03) | | 1L custom GPT, d=4, 2h, hd=2 | Factorized embed, rotation Q (2 angles), tied embed+V dir, rank-1 MLP, parabolic head, sinusoidal PE (period 11) | [repo](https://github.com/lichengliu03/TinyAdder-50p) |
+| 5 | 66 | 100% | [cosminscn](https://github.com/cosminscn) | | 1L nanoGPT, d=4, 2h | Rotation Q (2 angles), sparse c_proj (2 nonzero), parabolic lm_head, factorized embed, sinusoidal PE (period 11) | [gist](https://gist.github.com/cosminscn/e4d028281378e16b18e61fca1163f9cb) |
+| 6 | 87 | 100% | [bingbangboom-lab](https://github.com/bingbangboom-lab) | | 2L Qwen3, d=5, 2h/1kv, hd=2, ff=3 | Cross-layer sharing, rank-1 projections, sparse gate, low-rank head, frozen scaling params | [gist](https://gist.github.com/bingbangboom-lab/ec367a6078e9ac2c5748dbbb78eae2a1) |
+| 7 | 93 | 100% | [jacobli99](https://github.com/SeuperHakkerJa) | | 1L decoder, d=2, 5h (MQA), hd=2, ff=4 | Tied parabolic decode, RoPE digit routing, ReLU carry detection | [gist](https://gist.github.com/SeuperHakkerJa/9d615964d2284a9a699b5a24cf19e69d) |
+| 8 | 111 | 100% | [corbensorenson](https://github.com/corbensorenson) | Codex | 1L decoder, d=3, 4h/1kv, hd=2, ff=2 | Tied embed, RoPE, SwiGLU, GQA | [repo](https://github.com/corbensorenson/adderboard-submissions) |
+| 9 | 116 | 100% | [nino](https://github.com/prasannakotyal) | | 1L Qwen3, d=3, 4h/1kv, hd=2 | Tied embed, shared RMSNorm vectors, RoPE (hd=2) | [gist](https://gist.github.com/prasannakotyal/467d4c54564beba34d9d7edbd41c33dc) |
+| 10 | 121 | 100% | [Wonderfall](https://github.com/Wonderfall) ([@w0nderfall](https://x.com/w0nderfall)) | Codex | 1L Qwen3, d=3, 4h/1kv, hd=2, ff=2 | Tied embed, RoPE digit routing, carry via final norm, SiLU wrap detection | [gist](https://gist.github.com/Wonderfall/7d6f49aa6703352f94d3d80b4cd31e15) |
+| 11 | 130 | 100% | [cosminscn](https://github.com/cosminscn) | | 1L nanoGPT, d=4, 2h | Rank-1 linear, factorized embed, sinusoidal PE (period 11), ReLU carry detection, parabolic logit decoding | [gist](https://gist.github.com/cosminscn/89c110dbae76ea0c873d67607e466f5b) |
+| 12 | 130 | 100% | [Wonderfall](https://github.com/Wonderfall) ([@w0nderfall](https://x.com/w0nderfall)) | Codex | 1L Qwen3, d=3, 4h/1kv, hd=2, ff=3 | Tied embed, RoPE digit routing, SiLU carry logic | [gist](https://gist.github.com/Wonderfall/066df10de455cdc090900944bdc646cd) |
+| 13 | 139 | 100% | [Wonderfall](https://github.com/Wonderfall) ([@w0nderfall](https://x.com/w0nderfall)) | GPT-5.2 Pro + Codex | 1L Qwen3, d=3, 4h/1kv, hd=2 | Tied embed, RoPE digit routing, SiLU carry logic | [gist](https://gist.github.com/Wonderfall/191bea43ff7f9316ac178b6c185d7165) |
+| 14 | 148 | 100% | [bingbangboom-lab](https://github.com/bingbangboom-lab) | | 2L Qwen3, d=5, 2h/1kv, hd=2, ff=3 | Rank-1 linear, factorized embed, sparse gate, param-free norm, low-rank head, cross-layer sharing | [gist](https://gist.github.com/bingbangboom-lab/3594f00a1aa0b668e70a92c396d0f0d1) |
+| 15 | 177 | 100% | [xangma](https://github.com/xangma) ([@xangma](https://x.com/xangma)) | GPT + Codex | 2L Qwen3, d=5, 2h/1kv, hd=2 | Rank-1 linear, factorized embed, sparse gate, param-free norm, low-rank head | [gist](https://gist.github.com/xangma/1c2a1b2f9ca871b1f15646eed60d10ab) |
+| 16 | 197 | ~100%* | [xangma](https://github.com/xangma) ([@xangma](https://x.com/xangma)) | GPT + Codex | 2L Qwen3, d=5, 2h/1kv, hd=2 | Rank-1 linear, factorized embed, sparse gate, param-free norm | [gist](https://gist.github.com/xangma/c538a7a9d415f16e61f7bb26ae5cf6b0) |
+
+\* *Passed 8,192 random tests; not independently verified on our 10K test suite yet.*
+
+### Trained Weights (Learned from Data)
+
+| Rank | Params | Accuracy | Author | Built with | Architecture | Key Tricks | Link |
+|------|--------|----------|--------|------------|-------------|------------|------|
+| **1** | **162** | **100%** | **[fblissjr](https://github.com/fblissjr)** | **Claude Code + Gemini** | **1L decoder, d=3, 3h, ff=6** | **Fixed attention mask (hand-coded routing, 0 params), RMSNorm, reversed LSB-first, two-phase grokking (AdamW)** | **[repo](https://github.com/fblissjr/AdderBoard/blob/main/submission_trained.py)** |
+| 2 | 311 | 99.999% | [rezabyt](https://github.com/rezabyt) ([@reza_byt](https://x.com/reza_byt)) | | 1L decoder, d=4, 1h, ff=8 | Rank-3 factorization, shared-A tied-KV, RMSNorm, grokking | [repo](https://github.com/rezabyt/digit-addition-311p) |
+| 3 | 335 | 99.92% | [h3nock](https://github.com/h3nock) | | 1L decoder, d=4, 1h, ff=12 | Rank-3 factorization, shared-A tied-KV, RMSNorm, tied embed, curriculum learning | [repo](https://github.com/h3nock/tiny-adder-lab) |
+| 4 | 456 | 100% | [yinglunz](https://github.com/yinglunz) | | 1L decoder, d=7, 1h, ff=14 | Rank-3 factorization, shared-A tied-KV, rank-2 attn out, tied embed | [repo](https://github.com/yinglunz/A-456-Parameter-Transformer-Solves-10-Digit-Addition) |
+| 5 | 491 | 99.97% | [rezabyt](https://github.com/rezabyt) ([@reza_byt](https://x.com/reza_byt)) | | 1L decoder, d=7 | Rank-3 factorization, RMSNorm, curriculum learning | [repo](https://github.com/rezabyt/digit-addition-491p) |
+| 6 | 512 | 99.988% | [yinglunz](https://github.com/yinglunz) ([@yinglun122](https://x.com/yinglun122)) | | 1L decoder, d=7, 1h, ff=14 | Rank-3 factorization | [repo](https://github.com/yinglunz/A-456-Parameter-Transformer-Solves-10-Digit-Addition) |
+| 7 | 777 | 99.69% | [Yeb Havinga](https://github.com/yhavinga) ([@YebHavinga](https://x.com/YebHavinga)) | Claude Code | 1L decoder, d=7, 1h, ff=14 | Tied embeddings, no FFN bias, curriculum learning | [repo](https://github.com/yhavinga/gpt-acc-jax) |
+| 8 | 1,644 | 99.04% | [anadim](https://github.com/anadim) ([@dimitrispapail](https://x.com/dimitrispapail)) | Codex | 1L decoder, pair tokens | Pair token encoding (digit pairs as single tokens) | [repo](https://github.com/anadim/smallest-addition-transformer-codex) |
+| 9 | 6,080 | 100% | [anadim](https://github.com/anadim) ([@dimitrispapail](https://x.com/dimitrispapail)) | Claude Code | 2L decoder, d=16, ff=48 | Systematic scaling, found phase transition at d=16 | [repo](https://github.com/anadim/smallest-addition-transformer-claude-code) |
+
+## Rules
+
+### The Core Constraint: Autoregressive Transformer
+
+The model must operate as a **genuine autoregressive transformer**. This means:
+
+1. **Self-attention is required.** The model must contain at least one self-attention layer. This is the defining feature of a transformer — without it, you have an MLP or RNN, not a transformer.
+
+2. **The model must be autoregressive.** It receives a token sequence as input and predicts the next token. Output digits are generated one at a time, with each new token fed back as input for predicting the next. The carry propagation must emerge from this autoregressive process — not from explicit state variables passed between steps in Python.
+
+3. **Standard forward pass.** The model's `forward()` method must be a standard tensor-in, logits-out computation. No problem-specific control flow (for-loops over digits, explicit carry variables, string manipulation) inside `forward()`. The autoregressive generation loop lives *outside* the model, exactly as it would for any language model.
+
+4. **The model does the work, not the code.** The inference code should be generic autoregressive decoding that would work with *any* transformer checkpoint. If your generation loop contains addition-specific logic — manually pairing digits, threading carry state, indexing into specific positions — then the Python code is solving the problem, not the model.
+
+In short: if you can swap in a different set of weights and use the exact same inference code for a different task, your setup is legitimate. If the inference code is inseparable from the algorithm, it's not.
+
+### What's Allowed
+- Architectural variations: rank-1/low-rank projections, factorized embeddings, custom positional encodings, alternative norms
+- Hand-coded weights (constructive proofs are valid — they show the architecture *can* represent addition)
+- Trained weights via any generic learning algorithm (shows the solution is *learnable* — encourages creative ideas on data format, tokenization, and curriculum)
+- Input formatting choices (reversed digits, delimiters, etc.) as long as the format is fixed and doesn't encode the answer
+
+### Qualification
+- Must achieve **>= 99% accuracy** on 10,000 random test pairs (held-out, fixed seed)
+- Inputs: two integers in [0, 9,999,999,999]
+- Output: their sum as an integer
+- Verified using `verify.py` with `--seed 2025`
+
+### Parameter Counting
+- Count **unique** parameters (after weight tying/deduplication)
+- Fixed/sinusoidal positional encodings are not counted (following the original Transformer paper convention)
+- Learned positional encodings are counted
+
+## How to Submit
+
+**Option A: Open an Issue (easiest)**
+1. Click [New Issue](../../issues/new?template=new-submission.yml) and fill in the template
+2. Include a link to your code (GitHub repo, gist, etc.)
+3. Include test results (accuracy on random pairs)
+4. We'll verify and add you to the leaderboard
+
+**Option B: Open a Pull Request**
+1. Fork this repo
+2. Update the leaderboard in README.md with your entry
+3. Include verification results
+4. We'll review and merge
+
+Updates to the leaderboard are welcome via pull request.
+
+## Verification
+
+```bash
+python verify.py submissions/your_submission.py
+```
+
+This runs:
+- 10 edge cases (boundary values, max carry chains)
+- 10,000 random pairs (seed=2025)
+- Reports accuracy, pass/fail, and timing
+
+## Context
+
+This challenge explores a fundamental question: **what is the minimal transformer that can represent integer addition?**
+
+Addition requires three capabilities:
+1. **Digit alignment** — pairing corresponding digits from two numbers
+2. **Per-digit arithmetic** — computing sum and carry for each pair
+3. **Carry propagation** — threading carry information across positions
+
+Transformers solve these using attention (for alignment), MLPs (for arithmetic), and autoregressive generation (for carry propagation). The question is how small the architecture can be while still implementing all three.
+
+### Key Findings from the Community
+- **Parameter cliff at ~800**: Sharp accuracy transition observed by multiple researchers
+- **Single layers beat two layers** at equivalent parameter budgets (for trained models)
+- **d=7 was the sweet spot** for early trained models — multiple independent teams converged on this
+- **d=4 now works** with rank-3 factorization + grokking (311 params trained)
+- **Hand-coded models can go much smaller** (36 vs 311 trained) since they don't need to be discoverable by SGD
+- **Rank-3 factorization** is the key trick for trained models
+- **ALiBi enables extreme compression**: the 36-param leader uses ALiBi with slope log(10) for base-10 positional weighting, achieving 100% accuracy with a 2-layer decoder (d=5) in float64
+
+## License
+
+MIT
