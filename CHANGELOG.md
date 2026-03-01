@@ -1,5 +1,16 @@
 # Changelog
 
+## 0.3.1
+
+### Added
+- CLI inference engine (infer.py) with Rich styled output and uniplot confidence charts
+  - Rich Tables for long addition with per-digit columns and carry highlighting
+  - Rich Panels for model info and side-by-side comparison
+  - Unicode confidence bars and uniplot line charts in verbose mode
+  - Help command (h/help) with styled command reference
+  - Extracted run_compare() for deduplicated compare logic
+- Test suite (test_infer.py) with 45 tests covering parsing, encoding, formatting, inference
+
 ## 0.3.0
 
 ### Added
