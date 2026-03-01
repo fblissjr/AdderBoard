@@ -1,5 +1,17 @@
 # Changelog
 
+## 0.3.0
+
+### Added
+- Trained 162-parameter submission (100% accuracy on 10,010 test cases)
+  - Novel hybrid: fixed attention mask (0 params) + trained weights via AdamW
+  - Architecture: 1L, d=3, 3h, ff=6, reversed LSB-first digits
+  - Two-phase training: LR 0.01 exploration (50K steps) + LR 0.001 stabilization (5K steps)
+  - Beats trained leaderboard leader (311 params) by 149 params
+- Also qualified: 204p (mask-w12, 100%) and 456p (mask-large, 99.72%)
+- Training infrastructure: train_adder.py with fixed-mask configs, train_continue.py
+- Training report: reports/trained_submission.md
+
 ## 0.2.0
 
 ### Added

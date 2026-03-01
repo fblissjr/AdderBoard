@@ -1,8 +1,42 @@
-# AdderBoard
+# AdderBoard - fblissjr, claude, gemini experiments
 
 <p align="center">
   <img src="adderboard.png" width="500" alt="AdderBoard">
 </p>
+
+## Our Work So Far
+
+Co-authored by Claude (Opus), Gemini, and [fblissjr](https://github.com/fblissjr). See [AGENTS.md](AGENTS.md) for full methodology, training details, and experiment logs.
+
+These results are from our local `verify.py` runs. We haven't submitted to the official leaderboard yet and haven't independently verified all parameter counting claims.
+
+### Trained: 162 parameters (seeing 100% on local verify.py)
+
+1-layer transformer (d=3, 3 heads, ff=6) trained with AdamW. Uses a fixed attention mask derived from our hand-coded solution -- the mask encodes which positions attend to which (0 learnable params), and gradient descent learns what to compute (162 learnable params). Two-phase training: LR 0.01 for 50K steps, then LR 0.001 for 5K steps from best checkpoint. All training data randomly generated on the fly.
+
+```
+$ python verify.py submission_trained.py
+Model: 162-Parameter Trained Adder
+Results: 10010/10010 correct (100.00%)
+Status: QUALIFIED
+```
+
+Files: [`submission_trained.py`](submission_trained.py) | [`train_adder.py`](train_adder.py) | [`train_continue.py`](train_continue.py)
+
+### Hand-coded: 33 unique parameters (seeing 100% on local verify.py)
+
+1-layer transformer (d=3, 3 heads, ff=4) with analytically set weights. Uses ALiBi prefix sum with slope log(10) for carry computation in attention, residual cancellation head, e^80 softmax anchoring, 2-hinge ReLU step functions, and parabolic LM head.
+
+```
+$ python verify.py submission_1l.py
+Model: 1-Layer Adder (33 unique params)
+Results: 10010/10010 correct (100.00%)
+Status: QUALIFIED
+```
+
+Files: [`submission_1l.py`](submission_1l.py) | [`submission.py`](submission.py) (249-param 2L variant)
+
+---
 
 **Challenge:** Build the smallest transformer that can add two 10-digit numbers with >= 99% accuracy on a held-out 10K test set.
 

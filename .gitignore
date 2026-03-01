@@ -1,0 +1,24 @@
+# Python
+__pycache__/
+*.pyc
+.venv/
+.pytest_cache/
+
+# CMA-ES artifacts
+*.npy
+
+# CMA-ES artifacts
+cmaes_*.json
+
+# Archive (scratch files, old experiments)
+archive/
+
+# OS
+.DS_Store
+
+# Editor
+*.swp
+*~
+
+# Claude
+.claude/
