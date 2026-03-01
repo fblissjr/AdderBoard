@@ -148,6 +148,46 @@ This runs:
 - 10,000 random pairs (seed=2025)
 - Reports accuracy, pass/fail, and timing
 
+## Inference CLI
+
+Interactive tool for running addition problems through any submission with step-by-step visualization, confidence bars, carry annotation, and side-by-side model comparison.
+
+```bash
+# Install dependencies
+uv sync
+
+# Interactive REPL (defaults to trained 162p model)
+uv run python infer.py
+
+# Use a different model
+uv run python infer.py --model submission_1l.py
+
+# One-shot mode
+uv run python infer.py "123 + 456"
+
+# Verbose mode (per-digit logits, confidence chart)
+uv run python infer.py -v
+
+# Compare trained vs hand-coded side by side
+uv run python infer.py --compare
+
+# Batch mode (one problem per line on stdin)
+echo "123 + 456" | uv run python infer.py --batch
+```
+
+REPL commands:
+
+| Key | Action |
+|-----|--------|
+| `123 + 456` | Run addition problem |
+| `r [easy\|hard\|carries]` | Random problem (optionally by difficulty) |
+| `e` | Cycle through edge cases |
+| `v` | Toggle verbose mode |
+| `c` | Toggle compare mode |
+| `i` | Show model info |
+| `h` | Help |
+| `q` | Quit |
+
 ## Context
 
 This challenge explores a fundamental question: **what is the minimal transformer that can represent integer addition?**

@@ -1,6 +1,6 @@
 # AGENTS.md
 
-Last updated: 2026-02-28
+Last updated: 2026-03-01
 
 Co-authored by Claude (Opus 4), Gemini (2.5 Pro), and [fblissjr](https://github.com/fblissjr).
 
@@ -240,6 +240,8 @@ Architecture: 2L decoder, d=5, 2 heads (d_head=2), ff=4 per layer.
 | `train_adder.py` | Training script (all configs, model, mask, export) |
 | `train_continue.py` | Continuation training with autoregressive eval |
 | `inspect_checkpoint.py` | Inspect checkpoint weights, stats, and values |
+| `infer.py` | Interactive inference CLI with visualization and comparison |
+| `test_infer.py` | Tests for inference CLI |
 | `verify.py` | Official test harness (upstream) |
 | `test_dataset.json` | 10,010 test cases (upstream) |
 | `reports/trained_submission.md` | Detailed training report |
@@ -249,6 +251,20 @@ Architecture: 2L decoder, d=5, 2 heads (d_head=2), ff=4 per layer.
 | `CHANGELOG.md` | Version history |
 | `checkpoints/` | Training checkpoints (.pt files, gitignored) |
 | `archive/` | Scratch files and old experiments (gitignored) |
+
+## Inference CLI
+
+`infer.py` is an interactive inference engine for exploring model behavior on individual problems. It supports any submission file that follows the `build_model()` convention.
+
+Features:
+- **REPL mode**: Type problems (e.g. `123 + 456`), get results with long-form addition display and carry annotation.
+- **Verbose mode** (`-v`): Per-digit step table showing A, B, carry, sum, predicted token, and confidence bar. Includes a uniplot confidence chart.
+- **Compare mode** (`--compare`): Runs trained and hand-coded models side by side on the same problem with agreement checking.
+- **One-shot mode**: Pass a problem as argument (e.g. `uv run python infer.py "123 + 456"`).
+- **Batch mode** (`--batch`): Reads problems from stdin, one per line.
+- **Random/edge case generators**: `r`, `r easy`, `r hard`, `r carries`, `e` in the REPL.
+
+Auto-detects model type (trained vs hand-coded) from embedding vocab size (12 vs 11) and adjusts separator token encoding accordingly.
 
 ## Checkpoint Files
 

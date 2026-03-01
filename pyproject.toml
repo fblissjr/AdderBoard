@@ -1,7 +1,7 @@
 [project]
 name = "adderboard"
 version = "0.1.0"
-description = "Add your description here"
+description = "Smallest transformer that adds two 10-digit numbers"
 requires-python = ">=3.13"
 dependencies = [
     "cma>=4.4.4",
@@ -10,3 +10,6 @@ dependencies = [
     "torch>=2.10.0",
     "uniplot>=0.21.5",
 ]
+
+[tool.uv]
+package = false
